@@ -1,0 +1,5 @@
+
+Esquid:S1068-".Remove this unused "DIR_INTPUT" private field.(Üÿ„¥
+Jsquid:S1068.".Remove this unused "DIR_OUTPUT" private field.(ù‹³¯øÿÿÿÿ
+rsquid:S33051"VInject this field value directly into "readCSVFilesJob", the only method that uses it.(éõ¸²øÿÿÿÿ
+nsquid:S3305:"WInject this field value directly into "unzipTaskletStep", the only method that uses it.(ãªºð

@@ -2,18 +2,26 @@ package com.larbotech.batch.config;
 
 import com.larbotech.batch.mapper.EmployeeFieldSetMapper;
 import com.larbotech.batch.model.Employee;
+import com.larbotech.batch.partitioner.CustomMultiResourcePartitioner;
 import com.larbotech.batch.reader.CustomFlatFileItemReader;
 import com.larbotech.batch.reader.CustomMultiResourceItemReader;
 import com.larbotech.batch.reader.EmployeeCompletionPolicyReader;
+import com.larbotech.batch.tasklet.UnzipTasklet;
 import com.larbotech.batch.writer.ConsoleItemWriter;
 import com.larbotech.batch.writer.CustomFlatFileItemWriter;
 import java.io.IOException;
 import org.springframework.batch.core.Job;
+import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.core.Step;
 import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
 import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
 import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
+import org.springframework.batch.core.configuration.annotation.StepScope;
+import org.springframework.batch.core.job.builder.FlowBuilder;
+import org.springframework.batch.core.job.flow.Flow;
+import org.springframework.batch.core.job.flow.support.SimpleFlow;
 import org.springframework.batch.core.launch.support.RunIdIncrementer;
+import org.springframework.batch.core.partition.support.Partitioner;
 import org.springframework.batch.item.file.FlatFileItemReader;
 import org.springframework.batch.item.file.mapping.DefaultLineMapper;
 import org.springframework.batch.item.file.transform.BeanWrapperFieldExtractor;
@@ -26,6 +34,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.Resource;
+import org.springframework.core.task.TaskExecutor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 
 @Configuration
@@ -44,27 +54,34 @@ public class BatchConfig {
   @Value("input/inputData*.csv")
   private Resource[] inputResources;
 
+  @Autowired
+  UnzipTasklet unzipTasklet;
+
+
   @Bean
   public Job readCSVFilesJob() throws IOException {
     return jobBuilderFactory
         .get("readCSVFilesJob")
         .incrementer(new RunIdIncrementer())
-        .start(step1())
+        .start(masterStep())
         .build();
   }
 
   @Bean
   public Step step1() throws IOException {
     return stepBuilderFactory.get("step1").<Employee, Employee>chunk(customFlatFileItemReader())
-        .reader(multiResourceItemReader())
-        .writer(fileWriter())
+        .reader(multiResourceItemReader(null, null))
+        .writer(fileWriter(null, null))
         .build();
   }
 
   @Bean
-  public CustomMultiResourceItemReader multiResourceItemReader() throws IOException {
+  @StepScope
+  public CustomMultiResourceItemReader multiResourceItemReader(
+      @Value("#{stepExecutionContext[partitionId]}") String partitionId,
+      @Value("#{stepExecution.jobExecution}") JobExecution jobExecution) throws IOException {
     CustomMultiResourceItemReader resourceItemReader = new CustomMultiResourceItemReader(
-        DIR_INTPUT);
+        partitionId, jobExecution);
     resourceItemReader.setDelegate(customFlatFileItemReader());
     return resourceItemReader;
   }
@@ -117,9 +134,11 @@ public class BatchConfig {
 
 
   @Bean
-  public CustomFlatFileItemWriter fileWriter() {
+  @StepScope
+  public CustomFlatFileItemWriter fileWriter(@Value("#{stepExecutionContext[partitionId]}") String partitionId,
+      @Value("#{stepExecution.jobExecution}") JobExecution jobExecution) {
     //Create writer instance
-    CustomFlatFileItemWriter writer = new CustomFlatFileItemWriter(DIR_OUTPUT);
+    CustomFlatFileItemWriter writer = new CustomFlatFileItemWriter(partitionId, jobExecution);
 
     //All job repetitions should "append" to same output file
     writer.setAppendAllowed(true);
@@ -146,5 +165,60 @@ public class BatchConfig {
     return extractor;
   }
 
+  @Bean
+  public Step unzipTaskletStep() {
+    return stepBuilderFactory.get("unzipTaskletStep")
+        .tasklet(unzipTasklet)
+        .build();
+  }
+
+  @Bean
+  public Flow unzipAndProcessCsvFlow() throws IOException {
+    return new FlowBuilder<SimpleFlow>("unzipAndProcessCsvFlow")
+        .start(unzipTaskletStep())
+        .next(step1())
+        .build();
+
+  }
+
+  @Bean("partitioner")
+  @StepScope
+  public Partitioner partitioner() {
+
+    CustomMultiResourcePartitioner partitioner = new CustomMultiResourcePartitioner();
+    partitioner.setZipDirectory("src/main/resources/inputs");
+    partitioner.partition(10);
+    return partitioner;
+  }
+
+  @Bean
+  public Step unzipAndProcessCsvStepFlow() throws IOException {
+    return stepBuilderFactory.get("twoStepFlow")
+        .flow(unzipAndProcessCsvFlow())
+        .build();
+
+  }
+
+  @Bean
+  public Step masterStep() throws IOException {
+    return stepBuilderFactory.get("masterStep")
+        .partitioner(unzipAndProcessCsvStepFlow())
+        .partitioner("slaveStep", partitioner())
+        .gridSize(2)
+        .taskExecutor(taskExecutor())
+        .build();
+
+
+  }
+
+  @Bean
+  public TaskExecutor taskExecutor() {
+    ThreadPoolTaskExecutor taskExecutor = new ThreadPoolTaskExecutor();
+    taskExecutor.setMaxPoolSize(1);
+    taskExecutor.setCorePoolSize(1);
+    taskExecutor.afterPropertiesSet();
+    taskExecutor.setWaitForTasksToCompleteOnShutdown(true);
+    return taskExecutor;
+  }
 
 }

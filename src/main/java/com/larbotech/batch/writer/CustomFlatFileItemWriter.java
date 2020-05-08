@@ -6,8 +6,10 @@ import com.larbotech.batch.model.Employee;
 import com.larbotech.batch.model.EndEmployeeMarker;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Paths;
 import java.util.List;
 import java.util.stream.Collectors;
+import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.item.ExecutionContext;
 import org.springframework.batch.item.ItemStreamException;
 import org.springframework.batch.item.file.FlatFileItemWriter;
@@ -22,9 +24,10 @@ public class CustomFlatFileItemWriter extends FlatFileItemWriter<Employee> {
 
   private File outputDir;
 
-  public CustomFlatFileItemWriter(String outputDir) {
-    this.outputDir = new File(outputDir);
+  public CustomFlatFileItemWriter(String partitionId, JobExecution jobExecution) {
     super.setHeaderCallback(writer -> writer.write("id,firstName,lastName"));
+    String dirPath = jobExecution.getExecutionContext().getString(partitionId);
+    this.outputDir = new File(dirPath);
   }
 
   @Override
