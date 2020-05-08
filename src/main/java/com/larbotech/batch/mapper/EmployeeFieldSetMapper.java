@@ -5,7 +5,7 @@ import org.springframework.batch.item.file.mapping.FieldSetMapper;
 import org.springframework.batch.item.file.transform.FieldSet;
 import org.springframework.validation.BindException;
 
-public class EmployeeFieldSetMapper implements FieldSetMapper {
+public class EmployeeFieldSetMapper implements FieldSetMapper<Employee> {
 
   @Override
   public Employee mapFieldSet(FieldSet fieldSet) throws BindException {
